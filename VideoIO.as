@@ -1,16 +1,17 @@
 /*  Copyright (c) 2010-2011, Kundan Singh. See website for LICENSING.*/
 /*  Copyright (c) 2010-2011, VoIP Researcher.*/
 /*  Copyright (c) 2011-2012, Intencity Cloud Technologies.*/
+/*  Copyright (c) 2015-2016, StageRoom project.*/
 package {
 	import flash.display.DisplayObject;
 	import flash.display.LoaderInfo;
 	import flash.events.Event;
 	import flash.events.DataEvent;
-	import flash.external.ExternalInterface;
 	import flash.net.LocalConnection;
 	import flash.system.Security;
 	
 	import mx.core.Application;
+	import stageroom.utils.JSAdapter;
 	import mx.events.DynamicEvent;
 	import mx.events.FlexEvent;
 	import mx.events.PropertyChangeEvent;
@@ -29,17 +30,11 @@ package {
 		// a reference to an instance of type VideoIOInternal.
 		private var obj:Object = null;
 		
-		// facebook specific interfaces.
-		private var fbConnection1:LocalConnection;
-		private var fbConnectionName1:String;
-		private var fbConnection2:LocalConnection;
-		private var fbConnectionName2:String;
-		
 		// enable notification or not?
 		private var isChild:Boolean = false;
-		
-		// The URL of the project for facebook.
-		private static const BASE_URL:String = "http://myprojectguide.org/p/face-talk";
+
+		// JS Adapter
+		private var jsadapter:JSAdapter;
 
 		/**
 		 * The constructor sets the absolute layout with transparent background, no border, and
@@ -63,26 +58,12 @@ package {
 		{
 			obj = new component();
 			obj.percentWidth = obj.percentHeight = 100;
-			
-			// whether this is a child application or the top-level application.
-			if (CONFIG::sdk4) {
-				isChild = (mx.core.FlexGlobals.topLevelApplication != this);
-			}
-			else {
-				isChild = (Application.application != this);
-			}
-			trace("isChild=" + isChild);
-			
-			if (!isChild) {
-				// Facebook specific initialization
-				fbInitialize(null);
 
-				// minimum dimension to popup SecurityPanel
-				//TODO: does not work on Chrome with Flash Player 10.3
-				//obj.minWidth = 215;
-				//obj.minHeight = 138;
-			}
-			
+			// whether this is a child application or the top-level application.
+			isChild = (mx.core.FlexGlobals.topLevelApplication != this);
+
+			trace("isChild=" + isChild);
+
 			try {
 				// Listen for all interesting events from the internal implementation.
 				obj.addEventListener(FlexEvent.CREATION_COMPLETE, componentCompleteHandler, false, 0, true);
@@ -92,22 +73,17 @@ package {
 				obj.addEventListener("showingSettings", showingSettingsHandler, false, 0, true);
 				obj.addEventListener("hidingSettings", showingSettingsHandler, false, 0, true);
 				obj.addEventListener("receiveData", receiveDataHandler, false, 0, true);
-				
-				if (ExternalInterface.available) {
-					// For top-level application, install the Javascript API.
-					if (!isChild) {
-						ExternalInterface.addCallback("setProperty", setProperty);
-						ExternalInterface.addCallback("getProperty", getProperty);
-						ExternalInterface.addCallback("callProperty", callProperty);
-					}
-				} 
-				else {
-					trace("ExternalInterface is not available");
+
+				if (!isChild) {
+					jsadapter = JSAdapter.getInstance();
+					jsadapter.expose("setProperty", setProperty);
+					jsadapter.expose("getProperty", getProperty);
+					jsadapter.expose("callProperty", callProperty);
 				}
 			} catch (e:SecurityError) {
-				trace("security exception: " + e.message); 
+				trace("security exception: " + e.message);
 			}
-			
+
 			// For top-level application, process the "flashVars"
 			if (!isChild) {
 				for (var name:String in parameters) {
@@ -118,11 +94,11 @@ package {
 						setProperty(name, value);               // string
 				}
 			}
-			
+
 			// add the object as child of main application
 			addChild(DisplayObject(obj));
 		}
-		
+
 		/**
 		 * When "setProperty" is invoked from Javascript or parent application, it passes it
 		 * to the internal implementation.
@@ -137,7 +113,7 @@ package {
 				trace("setProperty(name=" + name + ") ignored");
 			}
 		}
-		
+
 		/**
 		 * When "getProperty" is invoked from Javascript or parent application, it passes it
 		 * to the internal implementation.
@@ -148,7 +124,7 @@ package {
 			trace("getProperty(" + name + ")=>" + (name != "snapshot" ? result : "hidden"));
 			return result;
 		}
-		
+
 		/**
 		 * When "callProperty" is invoked from Javascript or parent application, it passes it
 		 * to the internal implementation.
@@ -163,7 +139,7 @@ package {
 				trace("callProperty(" + name + ",...) exception\n" + e.getStackTrace());
 			}
 		}
-		
+
 		/**
 		 * When the internal implementation is created, it dispatches the onCreationComplete
 		 * event to parent application and onCreationComplete callback to javascript.
@@ -174,19 +150,15 @@ package {
 				if (isChild) {
 					dispatchEvent2(new Event("onCreationComplete"));
 				}
-				else if (ExternalInterface.available && ExternalInterface.objectID != null) {
-					var param:Object = {objectID: ExternalInterface.objectID};
-					trace("invoking JavaScript onCreationComplete objectID=" + ExternalInterface.objectID);
-					if (fbConnectionName1 == null)
-						ExternalInterface.call("onCreationComplete", param);
-					else
-						fbConnection1.send(fbConnectionName1, "callFBJS", "onCreationComplete", [param]); 
+				else {
+					jsadapter = JSAdapter.getInstance();
+					jsadapter.fireFlashReady("onCreationComplete");
 				}
 			} catch (e:Error) {
 				trace(e.getStackTrace());
 			}
 		}
-		
+
 		/**
 		 * When the internal implementation's property changes, it dispatches the onPropertyChange
 		 * event to parent application and onPropertyChange callback to javascript.
@@ -203,29 +175,28 @@ package {
 						ev.newValue = event.newValue;
 						dispatchEvent2(ev);
 					}
-					else if (ExternalInterface.available && ExternalInterface.objectID != null) {
+					else {
 						var param:Object = {
-								objectID: ExternalInterface.objectID, 
-								property: event.property, 
-								oldValue: event.oldValue, 
-								newValue: event.newValue
-							};
-							
-						trace("invoking JavaScript onPropertyChange objectID=" + ExternalInterface.objectID
-							+ " property=" + event.property
-							+ " oldValue=" + event.oldValue
-							+ " newValue=" + event.newValue);
-						if (fbConnectionName1 == null)
-							ExternalInterface.call("onPropertyChange", param);
-						else
-							fbConnection1.send(fbConnectionName1, "callFBJS", "onPropertyChange", [param]);
+							property: event.property,
+							oldValue: event.oldValue,
+							newValue: event.newValue
+						};
+
+
+						trace("invoking JavaScript onPropertyChange"
+								+ " property=" + event.property
+								+ " oldValue=" + event.oldValue
+								+ " newValue=" + event.newValue);
+
+						jsadapter = JSAdapter.getInstance();
+						jsadapter.call("onPropertyChange", param);
 					}
 				}
 			} catch (e:Error) {
 				trace(e.getStackTrace());
 			}
 		}
-		
+
 		/**
 		 * When the internal implementation invokes a callback, it dispatches the onCallback
 		 * event to parent application and onCallback callback to javascript.
@@ -239,26 +210,24 @@ package {
 					ev.args = event.args;
 					dispatchEvent2(ev);
 				}
-				else if (ExternalInterface.available && ExternalInterface.objectID != null) {
+				else {
 					var param:Object = {
-							objectID: ExternalInterface.objectID,
-							method: event.method,
-							args: event.args
-						};
-						
-						trace("invoking JavaScript onCallback objectID=" + ExternalInterface.objectID
+						method: event.method,
+						args: event.args
+					};
+
+					trace("invoking JavaScript onCallback"
 							+ " method=" + event.method
 							+ " args=" + event.args);
-					if (fbConnectionName1 == null)
-						ExternalInterface.call("onCallback", param);
-					else
-						fbConnection1.send(fbConnectionName1, "callFBJS", "onCallback", [param]);
+
+					jsadapter = JSAdapter.getInstance();
+					jsadapter.call("onCallback", param);
 				}
 			} catch (e:Error) {
 				trace(e.getStackTrace());
 			}
 		}
-		
+
 		/**
 		 * When the internal implementation dispatches postingNotify , it dispatches the onPostingNotify
 		 * event to parent application and onPostingNotify callback to javascript.
@@ -272,26 +241,24 @@ package {
 					ev.text = event.text;
 					dispatchEvent2(ev);
 				}
-				else if (ExternalInterface.available && ExternalInterface.objectID != null) {
+				else {
 					var param:Object = {
-							objectID: ExternalInterface.objectID,
-							user: event.user,
-							text: event.text
-						};
-						
-						trace("invoking JavaScript onPostingNotify objectID=" + ExternalInterface.objectID
+						user: event.user,
+						text: event.text
+					};
+
+					trace("invoking JavaScript onPostingNotify"
 							+ " user=" + event.user
 							+ " text=" + event.text);
-					if (fbConnectionName1 == null)
-						ExternalInterface.call("onPostingNotify", param);
-					else
-						fbConnection1.send(fbConnectionName1, "callFBJS", "onPostingNotify", [param]);
+
+					jsadapter = JSAdapter.getInstance();
+					jsadapter.call("onPostingNotify", param);
 				}
 			} catch (e:Error) {
 				trace(e.getStackTrace());
 			}
 		}
-		
+
 		/**
 		 * When the internal implementation dispatches receiveData, it dispatches the onReceiveData
 		 * event to parent application and onReceiveData callback to javascript.
@@ -304,24 +271,21 @@ package {
 					ev.data = event.data;
 					dispatchEvent2(ev);
 				}
-				else if (ExternalInterface.available && ExternalInterface.objectID != null) {
+				else {
 					var param:Object = {
-							objectID: ExternalInterface.objectID,
-							data: event.data
-						};
-						
-						trace("invoking JavaScript onReceiveData objectID=" + ExternalInterface.objectID
+						data: event.data
+					};
+
+					trace("invoking JavaScript onReceiveData"
 							+ " data=" + event.data);
-					if (fbConnectionName1 == null)
-						ExternalInterface.call("onReceiveData", param);
-					else
-						fbConnection1.send(fbConnectionName1, "callFBJS", "onReceiveData", [param]);
+					jsadapter = JSAdapter.getInstance();
+					jsadapter.call("onReceiveData", param);
 				}
 			} catch (e:Error) {
 				trace(e.getStackTrace());
 			}
 		}
-		
+
 		/**
 		 * When the internal implementation dispatches showingSettings or hidingSettings,
 		 * it dispatches the onShowingSettings event to parent application and onShowingSettings
@@ -336,78 +300,22 @@ package {
 					ev.showing = (event.type != "hidingSettings");
 					dispatchEvent2(ev);
 				}
-				else if (ExternalInterface.available && ExternalInterface.objectID != null) {
+				else {
 					var param:Object = {
-							objectID: ExternalInterface.objectID,
-							showing: (event.type != "hidingSettings")
-						};
-						
-						trace("invoking JavaScript onShowingSettings objectID=" + ExternalInterface.objectID
+						showing: (event.type != "hidingSettings")
+					};
+
+					trace("invoking JavaScript onShowingSettings"
 							+ " showing=" + (event.type != "hidingSettings"));
-					if (fbConnectionName1 == null)
-						ExternalInterface.call("onShowingSettings", param);
-					else
-						fbConnection1.send(fbConnectionName1, "callFBJS", "onShowingSettings", [param]);
+
+					jsadapter = JSAdapter.getInstance();
+					jsadapter.call("onShowingSettings", param);
 				}
 			} catch (e:Error) {
 				trace(e.getStackTrace());
 			}
 		}
-		
-		/**
-		 * To initialize for Facebook interface, we need to load the crossdomain and allow the facebook domains.
-		 * Finally we need to map the setProperty and getProperty functions.
-		 */
-		private function fbInitialize(event:Event):void
-		{
-			try {
-				if (('fb_local_connection' in LoaderInfo(this.root.loaderInfo).parameters)
-				|| ('fb_fbjs_connection' in LoaderInfo(this.root.loaderInfo).parameters)) {
-					Security.loadPolicyFile(BASE_URL + "/crossdomain.xml");
-					Security.allowDomain("apps.facebook.com");
-					Security.allowDomain("*.facebook.com");
-				}
-			}
-			catch (e:Error) {
-				trace("Error in Facebook security domain");
-			}
-			
-			try {
-				if ('fb_local_connection' in LoaderInfo(this.root.loaderInfo).parameters) {
-					fbConnection1 = new LocalConnection();
-					fbConnectionName1 = LoaderInfo(this.root.loaderInfo).parameters.fb_local_connection;
-					trace("Facebook local connection " + fbConnectionName1);
-				}
-			}
-			catch (e:Error) {
-				trace("Error in Facebook local connection");
-				trace(e.getStackTrace());
-			}
 
-			try {
-				if ('fb_fbjs_connection' in LoaderInfo(this.root.loaderInfo).parameters) {
-					fbConnection2 = new LocalConnection();
-					fbConnectionName2 = LoaderInfo(this.root.loaderInfo).parameters.fb_fbjs_connection; 
-					
-					fbConnection2.allowDomain("*");
-					fbConnection2.client = {
-						"setProperty": function(name:String, value:Object):void {
-							this.setProperty(name, value);
-						},
-						"getProperty": function(name:String):Object {
-							return this.getProperty(name);
-						}
-					};
-					fbConnection2.connect(fbConnectionName2);
-					trace("Facebook JS connection " + fbConnectionName2);
-				}
-			}
-			catch (e:Error) {
-				trace("Error in Facebook JS connection");
-				trace(e.getStackTrace());
-			}
-		}	
-		
 		/**
 		 * When dispatching an event, also dispatch using the loader info of the system manager
 		 * so that if this is a child application then the parent receives the event.
@@ -416,8 +324,8 @@ package {
 		{
 			//trace("dispatchEvent type=" + event.type);
 			dispatchEvent(event);
-			if (this.systemManager != null && this.systemManager.loaderInfo != null 
-			&& this.systemManager.loaderInfo.sharedEvents != null) 
+			if (this.systemManager != null && this.systemManager.loaderInfo != null
+			&& this.systemManager.loaderInfo.sharedEvents != null)
 				this.systemManager.loaderInfo.sharedEvents.dispatchEvent(event);
 		}
 	}
@@ -532,10 +440,10 @@ import mx.controls.Button;
 class VideoIOInternal extends Canvas
 {
 	// the product page URL
-	private static const COMPONENT_URL:String = "http://code.google.com/p/flash-videoio";
+	private static const COMPONENT_URL:String = "http://github.com/merqlove/flash-videoio";
 	
 	// the version string
-	private static const COMPONENT_VERSION:String = "Powered by Flash-VideoIO " + CONFIG::version;
+	private static const COMPONENT_VERSION:String = "Powered by Flash-VideoIO And StageRoom Team" + CONFIG::version;
 	
 	private var _src:String;
 	

@@ -1,0 +1,10 @@
+.idea
+*.iml
+html-template
+old
+out
+bin-release
+bin-debug
+.DS_Store
+VideoIO2.as
+src/*
