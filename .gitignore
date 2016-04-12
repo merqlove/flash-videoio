@@ -7,4 +7,6 @@ bin-release
 bin-debug
 .DS_Store
 VideoIO2.as
-src/*
+Wrapper.mxml
+src/Wrapper.mxml
+
