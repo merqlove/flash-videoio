@@ -3,6 +3,8 @@
  */
 package stageroom.utils {
 import flash.external.ExternalInterface;
+import flash.system.Security;
+
 import mx.core.FlexGlobals;
 
 public class JSAdapter {
@@ -21,6 +23,8 @@ public class JSAdapter {
         }
 
         if (ExternalInterface.available) {
+            Security.allowDomain("*");
+
             const application :* = FlexGlobals.topLevelApplication;
             const parameters :* = application.parameters;
 

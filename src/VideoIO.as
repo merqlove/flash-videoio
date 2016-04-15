@@ -3,22 +3,19 @@
 /*  Copyright (c) 2011-2012, Intencity Cloud Technologies.*/
 /*  Copyright (c) 2015-2016, StageRoom project.*/
 package {
-	import flash.display.DisplayObject;
-	import flash.display.LoaderInfo;
-	import flash.events.Event;
-	import flash.events.DataEvent;
-	import flash.net.LocalConnection;
-	import flash.system.Security;
-	
-	import mx.core.Application;
-	import stageroom.utils.JSAdapter;
-	import mx.events.DynamicEvent;
-	import mx.events.FlexEvent;
-	import mx.events.PropertyChangeEvent;
-	import mx.events.VideoEvent;
-	import mx.utils.ObjectUtil;
-	
-	/**
+import flash.display.DisplayObject;
+import flash.events.DataEvent;
+import flash.events.Event;
+
+import mx.core.Application;
+import mx.core.FlexGlobals;
+import mx.events.DynamicEvent;
+import mx.events.FlexEvent;
+import mx.events.PropertyChangeEvent;
+
+import stageroom.utils.JSAdapter;
+
+/**
 	 * The main application for Flash-VideoIO hides the internal implementation of VideoIOInternal
 	 * and translates the API using ExternalInterface. This model allows clear separation between
 	 * the application interface and the implementation.
@@ -60,7 +57,7 @@ package {
 			obj.percentWidth = obj.percentHeight = 100;
 
 			// whether this is a child application or the top-level application.
-			isChild = (mx.core.FlexGlobals.topLevelApplication != this);
+			isChild = (FlexGlobals.topLevelApplication != this);
 
 			trace("isChild=" + isChild);
 
@@ -332,31 +329,42 @@ package {
 }
 
 
-import flash.display.BitmapData;
 import flash.display.Bitmap;
+import flash.display.BitmapData;
 import flash.display.DisplayObject;
+import flash.display.Graphics;
 import flash.display.Stage;
 import flash.display.StageDisplayState;
 import flash.events.AsyncErrorEvent;
 import flash.events.ContextMenuEvent;
 import flash.events.DataEvent;
 import flash.events.ErrorEvent;
-import flash.events.FocusEvent;
+import flash.events.Event;
 import flash.events.FullScreenEvent;
+import flash.events.IEventDispatcher;
 import flash.events.IOErrorEvent;
-import flash.events.NetStatusEvent;
 import flash.events.MouseEvent;
+import flash.events.NetStatusEvent;
 import flash.events.ProgressEvent;
 import flash.events.SecurityErrorEvent;
 import flash.events.StatusEvent;
 import flash.events.TimerEvent;
 import flash.geom.Matrix;
 import flash.media.Camera;
+import flash.media.H264Level;
+import flash.media.H264Profile;
+import flash.media.H264VideoStreamSettings;
 import flash.media.Microphone;
+import flash.media.MicrophoneEnhancedMode;
+import flash.media.MicrophoneEnhancedOptions;
 import flash.media.SoundMixer;
 import flash.media.SoundTransform;
 import flash.media.Video;
+import flash.media.VideoStreamSettings;
+import flash.net.FileReference;
+import flash.net.GroupSpecifier;
 import flash.net.NetConnection;
+import flash.net.NetGroup;
 import flash.net.NetStream;
 import flash.net.ObjectEncoding;
 import flash.net.URLRequest;
@@ -364,32 +372,40 @@ import flash.net.navigateToURL;
 import flash.system.Capabilities;
 import flash.system.Security;
 import flash.system.SecurityPanel;
+import flash.text.TextField;
+import flash.text.TextFormat;
 import flash.ui.ContextMenu;
 import flash.ui.ContextMenuItem;
-import flash.utils.Timer;
 import flash.utils.ByteArray;
+import flash.utils.Proxy;
+import flash.utils.Timer;
+import flash.utils.flash_proxy;
 
 import mx.binding.utils.BindingUtils;
+import mx.binding.utils.ChangeWatcher;
 import mx.containers.Canvas;
+import mx.containers.HBox;
 import mx.controls.Alert;
+import mx.controls.Button;
 import mx.controls.Image;
+import mx.controls.LinkButton;
+import mx.controls.Spacer;
 import mx.controls.VideoDisplay;
-import mx.core.Application;
+import mx.core.FlexGlobals;
 import mx.core.UIComponent;
-import mx.events.FlexEvent;
+import mx.effects.Move;
+import mx.events.DynamicEvent;
 import mx.events.MetadataEvent;
 import mx.events.PropertyChangeEvent;
-import mx.events.PropertyChangeEventKind;
 import mx.events.ResizeEvent;
 import mx.events.VideoEvent;
-import mx.events.DynamicEvent;
 import mx.graphics.codec.JPEGEncoder;
-import mx.utils.Base64Encoder;
+import mx.resources.ResourceManager;
+import mx.skins.ProgrammaticSkin;
 import mx.utils.Base64Decoder;
+import mx.utils.Base64Encoder;
 
-import mx.controls.Button;
-
-// Following are dynamically used based on Flash Player version	
+// Following are dynamically used based on Flash Player version
 //	import flash.net.GroupSpecifier;
 //	import flash.net.NetGroup;
 
@@ -443,7 +459,7 @@ class VideoIOInternal extends Canvas
 	private static const COMPONENT_URL:String = "http://github.com/merqlove/flash-videoio";
 	
 	// the version string
-	private static const COMPONENT_VERSION:String = "Powered by Flash-VideoIO And StageRoom Team" + CONFIG::version;
+	private static const COMPONENT_VERSION:String = "Powered by Flash-VideoIO and StageRoom Team V" + CONFIG::version;
 	
 	private var _src:String;
 	
@@ -1458,11 +1474,9 @@ class VideoIOInternal extends Canvas
 				_microphone = value;
 				if (_microphoneObject != null) {
 					_microphoneObject = null;
-					if (CONFIG::sdk4) { 
-						// use getMicrophone to remove the enhance microphone which takes unnecessary CPU 
-						if (Microphone['getEnhancedMicrophone'] != undefined) {
-							var mic:Microphone = Microphone.getMicrophone(-1);
-						}
+					// use getMicrophone to remove the enhance microphone which takes unnecessary CPU
+					if (Microphone['getEnhancedMicrophone'] != undefined) {
+						var mic:Microphone = Microphone.getMicrophone(-1);
 					}
 					dispatchEvent(new Event("micChange"));
 				}
@@ -1477,30 +1491,27 @@ class VideoIOInternal extends Canvas
 							microphoneName = "default";
 						}
 					}
-					if (CONFIG::sdk4) {
-						if(Microphone['getEnhancedMicrophone'] == undefined) {
+
+					if(Microphone['getEnhancedMicrophone'] == undefined) {
+						_microphoneObject = Microphone.getMicrophone(index);
+					}
+					else {
+						if (!this.echoCancel) {
+							trace('enhanced mic available but not used');
 							_microphoneObject = Microphone.getMicrophone(index);
 						}
 						else {
-							if (!this.echoCancel) {
-								trace('enhanced mic available but not used');
-								_microphoneObject = Microphone.getMicrophone(index);
-							}
-							else {
-								trace('enhanced mic available and used');
-								_microphoneObject = Microphone['getEnhancedMicrophone'](index);
-								var options:Object = new flash.media.MicrophoneEnhancedOptions();
-								options.mode = flash.media.MicrophoneEnhancedMode.FULL_DUPLEX;
-								options.autoGain = false;
-								options.echoPath = 128;
-								options.nonLinearProcessing = true;
-								_microphoneObject['enhancedOptions'] = options;
-							}
-						} 
-					} 
-					else {
-						_microphoneObject = Microphone.getMicrophone(index);
+							trace('enhanced mic available and used');
+							_microphoneObject = Microphone['getEnhancedMicrophone'](index);
+							var options:Object = new MicrophoneEnhancedOptions();
+							options.mode = MicrophoneEnhancedMode.FULL_DUPLEX;
+							options.autoGain = false;
+							options.echoPath = 128;
+							options.nonLinearProcessing = true;
+							_microphoneObject['enhancedOptions'] = options;
+						}
 					}
+
 					if (_microphoneObject != null) {
 						_microphoneObject.codec = codec;
 						_microphoneObject.rate = rate;
@@ -2428,22 +2439,21 @@ class VideoIOInternal extends Canvas
 			trace("ignoring videoCodec property in this version of Flash Player");
 		}
 	}
-	
-	CONFIG::player11
-	private function createVideoStreamSettings():flash.media.VideoStreamSettings {
-		var s:flash.media.VideoStreamSettings;
+
+	private function createVideoStreamSettings():VideoStreamSettings {
+		var s:VideoStreamSettings;
 		if (_videoCodec.substr(0, 7) == "H264Avc") {
 			var parts:Array = _videoCodec.split("/");
-			var profile:String = parts.length >= 2 ? parts[1] : flash.media.H264Profile.BASELINE;
-			var level:String = parts.length >= 3 ? parts[2] : flash.media.H264Level.LEVEL_2;
-			s = new flash.media.H264VideoStreamSettings();
-			flash.media.H264VideoStreamSettings(s).setProfileLevel(profile, level);
+			var profile:String = parts.length >= 2 ? parts[1] : H264Profile.BASELINE;
+			var level:String = parts.length >= 3 ? parts[2] : H264Level.LEVEL_2;
+			s = new H264VideoStreamSettings();
+			H264VideoStreamSettings(s).setProfileLevel(profile, level);
 			trace("using H264Avc/" + profile + "/" + level);
 		} else if (_videoCodec == "Sorenson") {
-			s = new flash.media.VideoStreamSettings();
+			s = new VideoStreamSettings();
 		} else {
 			trace("ignoring invalid videoCodec property: " + _videoCodec + ". using Sorenson");
-			s = new flash.media.VideoStreamSettings();
+			s = new VideoStreamSettings();
 		}
 		// copy Camera settings to VideoStreamSettings.
 		s.setKeyFrameInterval(_keyFrameInterval);
@@ -2682,12 +2692,9 @@ class VideoIOInternal extends Canvas
 			}
 			else {
 				var menu:ContextMenu;
-				if (CONFIG::sdk4) {
-					menu = mx.core.FlexGlobals.topLevelApplication.contextMenu;
-				}
-				else {
-					menu = Application.application.contextMenu;
-				}
+
+				menu = FlexGlobals.topLevelApplication.contextMenu;
+
 				var found:Boolean = false;
 				for (var i:int=0; i<menu.customItems.length; ++i) {
 					if (menu.customItems[i].caption == "Toggle full-screen") {
@@ -2973,13 +2980,9 @@ class VideoIOInternal extends Canvas
 	{
 		if (privacyEvent && settingsTimer == null) {
 			dispatchEvent(new Event("showingSettings"));
-			
-			if (CONFIG::sdk4) {
-				var stage:Stage = mx.core.FlexGlobals.topLevelApplication.stage;
-			}
-			else {
-				var stage:Stage = Application.application.stage;
-			}
+
+			var stage:Stage = FlexGlobals.topLevelApplication.stage;
+
 			if (settingsTimer == null) {
 				stageChildren = stage.numChildren;
 				settingsTimer = new Timer(100, 0);
@@ -3021,12 +3024,8 @@ class VideoIOInternal extends Canvas
 	// In that case dispatch the hidingSettings event.
 	private function settingsTimerHandler(event:TimerEvent):void
 	{
-		if (CONFIG::sdk4) {
-			var stage:Stage = mx.core.FlexGlobals.topLevelApplication.stage;
-		}
-		else {
-			var stage:Stage = Application.application.stage;
-		}
+		var stage:Stage = FlexGlobals.topLevelApplication.stage;
+
 		if (settingsTimer != null && (stage.numChildren == stageChildren)) {
 			settingsTimer.removeEventListener(TimerEvent.TIMER, settingsTimerHandler);
 			settingsTimer.stop();
@@ -3157,16 +3156,12 @@ class VideoIOInternal extends Canvas
 		switch (event.info.code) {
 		case 'NetConnection.Connect.Success':
 			setProperty("nearID", nc.nearID);
-			if (CONFIG::sdk4) {
-				if (group != null) 
-					createGroup();
-				else if (autoplay && (publish != null || play != null))
-					createStream();
-			} 
-			else {
-				if (autoplay && (publish != null || play != null))
-					createStream();
-			}
+
+			if (group != null)
+				createGroup();
+			else if (autoplay && (publish != null || play != null))
+				createStream();
+
 			break;
 		case 'NetConnection.Connect.Failed':
 		case 'NetConnection.Connect.Rejected':
@@ -3253,19 +3248,18 @@ class VideoIOInternal extends Canvas
 	{
 		dispatchEvent(new DataEvent("receiveData", false, false, data));
 	}
-	
-	CONFIG::sdk4
+
 	private function createGroup():void
 	{
 		try {
-			_groupspec = new flash.net.GroupSpecifier(group);
+			_groupspec = new GroupSpecifier(group);
 			_groupspec.serverChannelEnabled = true;
 			_groupspec.postingEnabled = true;
 			_groupspec.multicastEnabled = true;
 //			_groupspec.ipMulticastMemberUpdatesEnabled = true;
 //			_groupspec.addIPMulticastAddress("224.1.2.3", 8082);
 			
-			_netGroup = new flash.net.NetGroup(nc, _groupspec.groupspecWithAuthorizations());
+			_netGroup = new NetGroup(nc, _groupspec.groupspecWithAuthorizations());
 			_netGroup.addEventListener(NetStatusEvent.NET_STATUS, netStatusHandler, false, 0, true);
 		} catch (e:Error) {
 			// ignore
@@ -3842,12 +3836,8 @@ class VideoIOInternal extends Canvas
 	private function installContextMenu():void
 	{
 		var menu:ContextMenu;
-		if (CONFIG::sdk4) {
-			menu = mx.core.FlexGlobals.topLevelApplication.contextMenu;
-		}
-		else {
-			menu = Application.application.contextMenu;
-		}
+		menu = FlexGlobals.topLevelApplication.contextMenu;
+
 		menu.hideBuiltInItems();
 		
 		var product:ContextMenuItem = new ContextMenuItem(VideoIOInternal.COMPONENT_VERSION);
@@ -3862,11 +3852,7 @@ class VideoIOInternal extends Canvas
 	}
 };
 
-import flash.events.IEventDispatcher;
-import flash.utils.Proxy;
-import flash.utils.flash_proxy;
-
-dynamic class CallProxy extends Proxy 
+	dynamic class CallProxy extends Proxy
 {
 	private var obj:IEventDispatcher;
 	
@@ -3923,46 +3909,6 @@ dynamic class CallProxy extends Proxy
 		}
 	}   	
 };
-
-import flash.display.Bitmap;
-import flash.display.BitmapData;
-import flash.display.DisplayObject;
-import flash.display.DisplayObjectContainer;
-import flash.display.Graphics;
-import flash.events.Event;
-import flash.events.MouseEvent;
-import flash.events.TimerEvent;
-import flash.geom.Matrix;
-import flash.media.Video;
-import flash.net.FileReference;
-import flash.text.TextField;
-import flash.text.TextFieldAutoSize;
-import flash.text.TextFormat;
-import flash.utils.ByteArray;
-import flash.utils.Timer;
-
-import mx.binding.utils.BindingUtils;
-import mx.binding.utils.ChangeWatcher;
-import mx.containers.Canvas;
-import mx.containers.HBox;
-import mx.controls.Alert;
-import mx.controls.Button;
-import mx.controls.HSlider;
-import mx.controls.LinkButton;
-import mx.controls.Spacer;
-import mx.controls.Text;
-import mx.core.Container;
-import mx.core.UIComponent;
-import mx.effects.Move;
-import mx.events.DynamicEvent;
-import mx.events.FlexEvent;
-import mx.events.PropertyChangeEvent;
-import mx.events.PropertyChangeEventKind;
-import mx.events.ResizeEvent;
-import mx.graphics.codec.JPEGEncoder;
-import mx.resources.ResourceManager;
-import mx.skins.ProgrammaticSkin;
-
 
 class VideoControl extends HBox
 {
